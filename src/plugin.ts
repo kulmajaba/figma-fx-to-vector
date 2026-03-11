@@ -32,6 +32,33 @@ function convertToVector(node: SceneNode, parent: BaseNode & ChildrenMixin, inde
   return figma.flatten([figma.union([node], parent, index)], parent, index);
 }
 
+function applySpread(vector: VectorNode, spread: number, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
+  if (spread === 0) return vector;
+
+  vector.strokes = [
+    {
+      type: 'SOLID',
+      color: { r: 0, g: 0, b: 0 },
+      opacity: 1
+    }
+  ];
+  vector.strokeWeight = Math.abs(spread);
+  vector.strokeAlign = spread > 0 ? 'OUTSIDE' : 'INSIDE';
+
+  const strokeOutline = vector.outlineStroke();
+  if (!strokeOutline) {
+    console.error('applySpread failed');
+    vector.strokes = [];
+    return vector;
+  }
+
+  const union =
+    spread > 0
+      ? figma.union([vector, strokeOutline], parent, index)
+      : figma.subtract([vector, strokeOutline], parent, index);
+  return figma.flatten([union], parent, index);
+}
+
 async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShadowEffect): Promise<void> {
   const { color, offset, radius, blendMode } = shadow;
 
@@ -107,7 +134,13 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   for (const shadow of dropShadows) {
     const clone = node.clone();
 
-    const vector = convertToVector(clone, parentWithChildren, nodeIndex);
+    let vector = convertToVector(clone, parentWithChildren, nodeIndex);
+
+    // Emulate spread by expanding the vector outline.
+    const spread = shadow.spread;
+    if (spread !== undefined && spread !== 0) {
+      vector = applySpread(vector, spread, parentWithChildren, nodeIndex);
+    }
 
     await applyDropShadowToVector(vector, shadow);
     vector.name = `${node.name} (${EFFECT_NAME_SUFFIX[shadow.type]})`;
@@ -165,7 +198,7 @@ async function main(): Promise<void> {
   if (convertedCount > 0) {
     figma.notify(strings.success);
   } else {
-    figma.notify(strings.noEffects);
+    figma.notify(strings.error);
   }
 
   figma.closePlugin();
