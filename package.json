@@ -4,14 +4,16 @@
   "description": "Your Figma Plugin",
   "main": "code.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "esbuild src/plugin.ts --bundle --outfile=dist/plugin.js --format=esm --target=es2017",
     "lint": "eslint --ext .ts,.tsx --ignore-pattern node_modules .",
     "lint:fix": "eslint --ext .ts,.tsx --ignore-pattern node_modules --fix .",
+    "tsc": "tsc --noEmit -p .",
     "start": "npm run build -- --watch"
   },
   "author": "Mika Kuitunen",
   "license": "",
   "devDependencies": {
+    "esbuild": "^0.25.0",
     "@figma/eslint-plugin-figma-plugins": "*",
     "@figma/plugin-typings": "*",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
