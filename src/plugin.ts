@@ -1,24 +1,35 @@
 import strings from './strings';
 
+type EffectType = Effect['type'];
+
 // MVP: drop shadow only
-const ALLOWED_EFFECT_TYPES: ReadonlyArray<Effect['type']> = ['DROP_SHADOW'];
+const ALLOWED_EFFECT_TYPES: ReadonlyArray<EffectType> = ['DROP_SHADOW'];
+
+const EFFECT_NAME_SUFFIX: Partial<Record<EffectType, string>> = {
+  DROP_SHADOW: 'Shadow'
+};
 
 function hasAllowedEffects(node: SceneNode): boolean {
   if (!('effects' in node)) return false;
-  const { effects } = node as SceneNode & BlendMixin;
+  const { effects } = node;
   return effects.some((e: Effect) => ALLOWED_EFFECT_TYPES.includes(e.type) && e.visible);
 }
 
-function getDropShadows(node: SceneNode & { effects: ReadonlyArray<Effect> }): DropShadowEffect[] {
+function getVisibleDropShadows(node: SceneNode & { effects: ReadonlyArray<Effect> }): DropShadowEffect[] {
   return node.effects.filter((e): e is DropShadowEffect => e.type === 'DROP_SHADOW' && e.visible);
 }
 
 function convertToVector(node: SceneNode, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
-  if (node.type === 'VECTOR') {
-    parent.insertChild(index, node);
-    return node;
+  if ('outlineStroke' in node) {
+    const strokeOutline = (node as SceneNode & GeometryMixin).outlineStroke();
+    if (strokeOutline) {
+      // Union fill geometry + stroke outline, then flatten to a single vector.
+      const union = figma.union([node, strokeOutline], parent, index);
+      return figma.flatten([union], parent, index);
+    }
   }
-  return figma.flatten([node], parent, index);
+
+  return figma.flatten([figma.union([node], parent, index)], parent, index);
 }
 
 async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShadowEffect): Promise<void> {
@@ -27,8 +38,7 @@ async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShado
   let fillPaint: SolidPaint = {
     type: 'SOLID',
     color: { r: color.r, g: color.g, b: color.b },
-    opacity: color.a,
-    visible: true
+    opacity: color.a
   };
 
   if (shadow.boundVariables?.color) {
@@ -84,7 +94,7 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   if (!('effects' in node)) return null;
 
   const effectsNode = node as SceneNode & { effects: ReadonlyArray<Effect> };
-  const dropShadows = getDropShadows(effectsNode);
+  const dropShadows = getVisibleDropShadows(effectsNode);
   if (dropShadows.length === 0) return null;
 
   const parent = node.parent;
@@ -100,6 +110,7 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
     const vector = convertToVector(clone, parentWithChildren, nodeIndex);
 
     await applyDropShadowToVector(vector, shadow);
+    vector.name = `${node.name} (${EFFECT_NAME_SUFFIX[shadow.type]})`;
     shadowVectors.push(vector);
   }
 
