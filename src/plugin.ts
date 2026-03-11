@@ -1,11 +1,11 @@
-import strings from "./strings";
+import strings from './strings';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 /** Effect types handled by this plugin (MVP: drop shadow only). */
-const ALLOWED_EFFECT_TYPES: ReadonlyArray<string> = ["DROP_SHADOW"];
+const ALLOWED_EFFECT_TYPES: ReadonlyArray<string> = ['DROP_SHADOW'];
 
 // ---------------------------------------------------------------------------
 // Helpers – effect inspection
@@ -13,21 +13,14 @@ const ALLOWED_EFFECT_TYPES: ReadonlyArray<string> = ["DROP_SHADOW"];
 
 /** Checks whether a node carries at least one visible effect we can convert. */
 function hasAllowedEffects(node: SceneNode): boolean {
-  if (!("effects" in node)) return false;
+  if (!('effects' in node)) return false;
   const { effects } = node as SceneNode & BlendMixin;
-  return effects.some(
-    (e: Effect) => ALLOWED_EFFECT_TYPES.includes(e.type) && e.visible !== false,
-  );
+  return effects.some((e: Effect) => ALLOWED_EFFECT_TYPES.includes(e.type) && e.visible !== false);
 }
 
 /** Returns all visible drop-shadow effects on a node. */
-function getDropShadows(
-  node: SceneNode & { effects: ReadonlyArray<Effect> },
-): DropShadowEffect[] {
-  return node.effects.filter(
-    (e): e is DropShadowEffect =>
-      e.type === "DROP_SHADOW" && e.visible !== false,
-  );
+function getDropShadows(node: SceneNode & { effects: ReadonlyArray<Effect> }): DropShadowEffect[] {
+  return node.effects.filter((e): e is DropShadowEffect => e.type === 'DROP_SHADOW' && e.visible !== false);
 }
 
 // ---------------------------------------------------------------------------
@@ -39,12 +32,8 @@ function getDropShadows(
  * Uses `figma.flatten` (union + flatten) which handles groups, boolean ops,
  * frames, and other complex node types.
  */
-function convertToVector(
-  node: SceneNode,
-  parent: BaseNode & ChildrenMixin,
-  index: number,
-): VectorNode {
-  if (node.type === "VECTOR") {
+function convertToVector(node: SceneNode, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
+  if (node.type === 'VECTOR') {
     // Already a vector – just make sure it sits at the right index.
     parent.insertChild(index, node);
     return node;
@@ -66,30 +55,21 @@ function convertToVector(
  * Bound variables are re-applied where the Figma API allows it
  * (color → fill paint, radius → blur effect).
  */
-async function applyDropShadowToVector(
-  vectorNode: VectorNode,
-  shadow: DropShadowEffect,
-): Promise<void> {
+async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShadowEffect): Promise<void> {
   const { color, offset, radius, blendMode } = shadow;
 
   // --- Fill ---------------------------------------------------------------
   let fillPaint: SolidPaint = {
-    type: "SOLID",
+    type: 'SOLID',
     color: { r: color.r, g: color.g, b: color.b },
     opacity: color.a,
-    visible: true,
+    visible: true
   };
 
   if (shadow.boundVariables?.color) {
-    const variable = await figma.variables.getVariableByIdAsync(
-      shadow.boundVariables.color.id,
-    );
+    const variable = await figma.variables.getVariableByIdAsync(shadow.boundVariables.color.id);
     if (variable) {
-      fillPaint = figma.variables.setBoundVariableForPaint(
-        fillPaint,
-        "color",
-        variable,
-      );
+      fillPaint = figma.variables.setBoundVariableForPaint(fillPaint, 'color', variable);
     }
   }
 
@@ -108,22 +88,16 @@ async function applyDropShadowToVector(
 
   if (radius > 0 || hasBoundRadius) {
     let blurEffect: BlurEffect = {
-      type: "LAYER_BLUR",
-      blurType: "NORMAL",
+      type: 'LAYER_BLUR',
+      blurType: 'NORMAL',
       radius,
-      visible: true,
+      visible: true
     };
 
     if (hasBoundRadius) {
-      const variable = await figma.variables.getVariableByIdAsync(
-        shadow.boundVariables!.radius!.id,
-      );
+      const variable = await figma.variables.getVariableByIdAsync(shadow.boundVariables!.radius!.id);
       if (variable) {
-        blurEffect = figma.variables.setBoundVariableForEffect(
-          blurEffect,
-          "radius",
-          variable,
-        ) as BlurEffect;
+        blurEffect = figma.variables.setBoundVariableForEffect(blurEffect, 'radius', variable) as BlurEffect;
       }
     }
 
@@ -149,19 +123,17 @@ async function applyDropShadowToVector(
  * to convert.
  */
 async function processNode(node: SceneNode): Promise<GroupNode | null> {
-  if (!("effects" in node)) return null;
+  if (!('effects' in node)) return null;
 
   const effectsNode = node as SceneNode & { effects: ReadonlyArray<Effect> };
   const dropShadows = getDropShadows(effectsNode);
   if (dropShadows.length === 0) return null;
 
   const parent = node.parent;
-  if (!parent || !("children" in parent)) return null;
+  if (!parent || !('children' in parent)) return null;
 
   const parentWithChildren = parent as BaseNode & ChildrenMixin;
-  const nodeIndex = (
-    parentWithChildren.children as ReadonlyArray<SceneNode>
-  ).indexOf(node);
+  const nodeIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(node);
 
   // --- Create a shadow vector for each drop-shadow effect -----------------
   const shadowVectors: VectorNode[] = [];
@@ -180,22 +152,16 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   }
 
   // --- Strip converted shadows from the original --------------------------
-  const remainingEffects = effectsNode.effects.filter(
-    (e) => e.type !== "DROP_SHADOW" || e.visible === false,
-  );
+  const remainingEffects = effectsNode.effects.filter((e) => e.type !== 'DROP_SHADOW' || e.visible === false);
   (node as SceneNode & BlendMixin).effects = remainingEffects;
 
   // --- Group everything (original on top, shadows below) ------------------
   // After inserting shadow vectors the indices have shifted. Recalculate so
   // the new group sits in the same layer position as the original node.
-  const groupIndex = (
-    parentWithChildren.children as ReadonlyArray<SceneNode>
-  ).indexOf(shadowVectors[shadowVectors.length - 1]);
-  const group = figma.group(
-    [node, ...shadowVectors],
-    parentWithChildren,
-    groupIndex,
+  const groupIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(
+    shadowVectors[shadowVectors.length - 1]
   );
+  const group = figma.group([node, ...shadowVectors], parentWithChildren, groupIndex);
   group.name = node.name;
 
   return group;
