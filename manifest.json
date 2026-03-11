@@ -1,0 +1,13 @@
+{
+  "name": "FX to Vector",
+  "id": "1613530701383137384",
+  "api": "1.0.0",
+  "main": "dist/plugin.js",
+  "capabilities": [],
+  "enableProposedApi": false,
+  "documentAccess": "dynamic-page",
+  "editorType": ["figma"],
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}
