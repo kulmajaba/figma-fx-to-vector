@@ -7,7 +7,12 @@ import {
 import t, { effectNameSuffix } from './strings';
 import { convertToVector } from './vectorUtils';
 
-function applySpread(vector: VectorNode, spread: number, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
+const applySpread = (
+  vector: VectorNode,
+  spread: number,
+  parent: BaseNode & ChildrenMixin,
+  index: number
+): VectorNode => {
   if (spread === 0) return vector;
 
   vector.strokes = [
@@ -29,7 +34,7 @@ function applySpread(vector: VectorNode, spread: number, parent: BaseNode & Chil
   }
 
   // outlineStroke clones the node but the position may be off,
-  // fix by using absoluteTransform
+  // fix by using absoluteTransform and offset by spread
   strokeOutline.x = vector.absoluteTransform[0][2] - spread;
   strokeOutline.y = vector.absoluteTransform[1][2] - spread;
 
@@ -38,9 +43,9 @@ function applySpread(vector: VectorNode, spread: number, parent: BaseNode & Chil
       ? figma.union([vector, strokeOutline], parent, index)
       : figma.subtract([vector, strokeOutline], parent, index);
   return figma.flatten([union], parent, index);
-}
+};
 
-async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShadowEffect): Promise<void> {
+const applyDropShadowToVector = async (vectorNode: VectorNode, shadow: DropShadowEffect) => {
   const { color, offset, radius, blendMode } = shadow;
 
   let fillPaint: SolidPaint = {
@@ -83,7 +88,7 @@ async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShado
 
     vectorNode.effects = [blurEffect];
   }
-}
+};
 
 /**
  * Processes a single node:
@@ -101,7 +106,7 @@ async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShado
  * Returns the wrapping `GroupNode` on success, or `null` when there is nothing
  * to convert.
  */
-async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<GroupNode | null> {
+const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<GroupNode | null> => {
   if (!('effects' in node)) return null;
 
   const effectsNode = node as SceneNode & { effects: ReadonlyArray<Effect> };
@@ -125,7 +130,6 @@ async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<Group
 
     let vector = convertToVector(clone, parent, nodeIndex);
 
-    // Emulate spread by expanding the vector outline.
     const spread = shadow.spread;
     if (spread !== undefined && spread !== 0) {
       vector = applySpread(vector, spread, parent, nodeIndex);
@@ -136,7 +140,6 @@ async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<Group
     shadowVectors.push(vector);
   }
 
-  // Clean up the snapshot – it's no longer needed.
   if (snapshot) snapshot.remove();
 
   // Strip converted effects from the original node
@@ -149,9 +152,11 @@ async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<Group
   group.name = node.name;
 
   return group;
-}
+};
 
-async function processNodeDeep(node: SceneNode): Promise<{ result: SceneNode; converted: number; available: number }> {
+const processNodeDeep = async (
+  node: SceneNode
+): Promise<{ result: SceneNode; converted: number; available: number }> => {
   let converted = 0;
   let available = 0;
 
@@ -185,9 +190,9 @@ async function processNodeDeep(node: SceneNode): Promise<{ result: SceneNode; co
   }
 
   return { result: node, converted, available };
-}
+};
 
-async function main() {
+const main = async () => {
   const selection = figma.currentPage.selection;
 
   if (selection.length === 0) {
@@ -215,7 +220,7 @@ async function main() {
   figma.currentPage.selection = newSelection;
 
   if (totalConverted > 0) {
-    figma.notify(t('partialSuccess', { converted: totalConverted, available: totalAvailable }));
+    figma.notify(t('success', { converted: totalConverted, available: totalAvailable }));
   } else if (totalAvailable === 0) {
     figma.notify(t('noEffects'));
   } else {
@@ -223,6 +228,6 @@ async function main() {
   }
 
   figma.closePlugin();
-}
+};
 
 main();
