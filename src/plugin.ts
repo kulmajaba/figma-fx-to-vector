@@ -30,9 +30,8 @@ function applySpread(vector: VectorNode, spread: number, parent: BaseNode & Chil
 
   // outlineStroke clones the node but the position may be off,
   // fix by using absoluteTransform
-  // TODO: still fucked
-  strokeOutline.x = vector.absoluteTransform[0][2];
-  strokeOutline.y = vector.absoluteTransform[1][2];
+  strokeOutline.x = vector.absoluteTransform[0][2] - spread;
+  strokeOutline.y = vector.absoluteTransform[1][2] - spread;
 
   const union =
     spread > 0
