@@ -1,45 +1,11 @@
-import t from './strings';
-
-type EffectType = Effect['type'];
-
-// MVP: drop shadow only
-const SUPPORTED_EFFECT_TYPES: ReadonlyArray<EffectType> = ['DROP_SHADOW'];
-
-const EFFECT_NAME_SUFFIX: Partial<Record<EffectType, string>> = {
-  DROP_SHADOW: 'Shadow'
-};
-
-function hasSupportedEffects(node: SceneNode): boolean {
-  if (!('effects' in node)) return false;
-  const { effects } = node;
-  return effects.some((e: Effect) => SUPPORTED_EFFECT_TYPES.includes(e.type) && e.visible);
-}
-
-function hasSupportedEffectsDeep(node: SceneNode): boolean {
-  if (hasSupportedEffects(node)) return true;
-  if ('children' in node) {
-    return node.children.some((child) => hasSupportedEffectsDeep(child as SceneNode));
-  }
-  return false;
-}
-
-function getVisibleDropShadows(node: SceneNode & { effects: ReadonlyArray<Effect> }): DropShadowEffect[] {
-  return node.effects.filter((e): e is DropShadowEffect => e.type === 'DROP_SHADOW' && e.visible);
-}
-
-function convertToVector(node: SceneNode, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
-  if ('outlineStroke' in node) {
-    // SHould return null if no strokes are present but there might be a bug here
-    const strokeOutline = (node as SceneNode & GeometryMixin).outlineStroke();
-    if (strokeOutline !== null) {
-      // Union fill geometry + stroke outline, then flatten to a single vector.
-      const union = figma.union([node, strokeOutline], parent, index);
-      return figma.flatten([union], parent, index);
-    }
-  }
-
-  return figma.flatten([figma.union([node], parent, index)], parent, index);
-}
+import {
+  getVisibleDropShadows,
+  hasSupportedEffects,
+  hasSupportedEffectsDeep,
+  isSupportedVisibleEffect
+} from './effectUtils';
+import t, { effectNameSuffix } from './strings';
+import { convertToVector } from './vectorUtils';
 
 function applySpread(vector: VectorNode, spread: number, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
   if (spread === 0) return vector;
@@ -117,9 +83,6 @@ async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShado
     }
 
     vectorNode.effects = [blurEffect];
-  } else {
-    // TODO: remove?
-    vectorNode.effects = [];
   }
 }
 
@@ -149,8 +112,7 @@ async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<Group
   const parent = node.parent;
   if (!parent) return null;
 
-  const parentWithChildren = parent as BaseNode & ChildrenMixin;
-  const nodeIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(node);
+  const nodeIndex = parent.children.indexOf(node);
 
   const cloneSource = snapshot ?? node;
 
@@ -162,16 +124,16 @@ async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<Group
     clone.x = node.absoluteTransform[0][2];
     clone.y = node.absoluteTransform[1][2];
 
-    let vector = convertToVector(clone, parentWithChildren, nodeIndex);
+    let vector = convertToVector(clone, parent, nodeIndex);
 
     // Emulate spread by expanding the vector outline.
     const spread = shadow.spread;
     if (spread !== undefined && spread !== 0) {
-      vector = applySpread(vector, spread, parentWithChildren, nodeIndex);
+      vector = applySpread(vector, spread, parent, nodeIndex);
     }
 
     await applyDropShadowToVector(vector, shadow);
-    vector.name = `${node.name} (${EFFECT_NAME_SUFFIX[shadow.type]})`;
+    vector.name = `${node.name} (${effectNameSuffix[shadow.type]})`;
     shadowVectors.push(vector);
   }
 
@@ -179,14 +141,12 @@ async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<Group
   if (snapshot) snapshot.remove();
 
   // Strip converted effects from the original node
-  const remainingEffects = effectsNode.effects.filter((e) => e.type !== 'DROP_SHADOW' || e.visible === false);
+  const remainingEffects = effectsNode.effects.filter((e) => !isSupportedVisibleEffect(e));
   node.effects = remainingEffects;
 
   // Group result in place
-  const groupIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(
-    shadowVectors[shadowVectors.length - 1]
-  );
-  const group = figma.group([node, ...shadowVectors], parentWithChildren, groupIndex);
+  const groupIndex = parent.children.indexOf(shadowVectors[shadowVectors.length - 1]);
+  const group = figma.group([node, ...shadowVectors], parent, groupIndex);
   group.name = node.name;
 
   return group;

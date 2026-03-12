@@ -1,8 +1,14 @@
+import { EffectType } from './effectUtils';
+
 const strings = {
   partialSuccess: 'Converted {{converted}} out of {{available}} supported effects',
   error: 'An error occurred, could not convert effects.',
   noSelection: 'Select one or more layers to convert.',
   noEffects: 'No supported effects found in selection.'
+};
+
+export const effectNameSuffix: Partial<Record<EffectType, string>> = {
+  DROP_SHADOW: 'Shadow'
 };
 
 const CONTROL_STATEMENT_REGEX = /\{\{\s*([\w\d-_]+)\s?\}\}/g;
