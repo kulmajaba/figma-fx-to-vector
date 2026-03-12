@@ -21,8 +21,9 @@ function getVisibleDropShadows(node: SceneNode & { effects: ReadonlyArray<Effect
 
 function convertToVector(node: SceneNode, parent: BaseNode & ChildrenMixin, index: number): VectorNode {
   if ('outlineStroke' in node) {
+    // SHould return null if no strokes are present but there might be a bug here
     const strokeOutline = (node as SceneNode & GeometryMixin).outlineStroke();
-    if (strokeOutline) {
+    if (strokeOutline !== null) {
       // Union fill geometry + stroke outline, then flatten to a single vector.
       const union = figma.union([node, strokeOutline], parent, index);
       return figma.flatten([union], parent, index);
@@ -46,11 +47,17 @@ function applySpread(vector: VectorNode, spread: number, parent: BaseNode & Chil
   vector.strokeAlign = spread > 0 ? 'OUTSIDE' : 'INSIDE';
 
   const strokeOutline = vector.outlineStroke();
-  if (!strokeOutline) {
+
+  if (strokeOutline === null) {
     console.error('applySpread failed');
     vector.strokes = [];
     return vector;
   }
+
+  // outlineStroke clones the node but the position may be off,
+  // fix by using absoluteTransform
+  strokeOutline.x = vector.absoluteTransform[0][2];
+  strokeOutline.y = vector.absoluteTransform[1][2];
 
   const union =
     spread > 0
@@ -125,7 +132,7 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   if (dropShadows.length === 0) return null;
 
   const parent = node.parent;
-  if (!parent || !('children' in parent)) return null;
+  if (!parent) return null;
 
   const parentWithChildren = parent as BaseNode & ChildrenMixin;
   const nodeIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(node);
@@ -133,6 +140,10 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   const shadowVectors: VectorNode[] = [];
   for (const shadow of dropShadows) {
     const clone = node.clone();
+    // The new clone is at this point parented to figma.currentPage
+    // so the position needs to be set according to the original's absolute transform
+    clone.x = node.absoluteTransform[0][2];
+    clone.y = node.absoluteTransform[1][2];
 
     let vector = convertToVector(clone, parentWithChildren, nodeIndex);
 
