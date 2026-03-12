@@ -28,16 +28,12 @@ const t = (key: keyof typeof strings, args?: Record<string, string | number>) =>
     const endIndex = match.index + match[0].length;
     const value = args[valueKey];
 
-    console.log(`Found ${valueKey} start=${startIndex} end=${endIndex}.`);
-
     if (value !== undefined) {
       formattedStr += `${str.slice(previousEndIndex, startIndex)}${value}`;
     } else {
       console.warn(`String '${key}': Could not find value for '${valueKey}' in args:`, args);
       formattedStr += str.slice(previousEndIndex, endIndex);
     }
-
-    console.log('formattedStr:', formattedStr);
 
     previousEndIndex = endIndex;
   }
