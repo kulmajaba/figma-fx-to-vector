@@ -3,16 +3,24 @@ import t from './strings';
 type EffectType = Effect['type'];
 
 // MVP: drop shadow only
-const ALLOWED_EFFECT_TYPES: ReadonlyArray<EffectType> = ['DROP_SHADOW'];
+const SUPPORTED_EFFECT_TYPES: ReadonlyArray<EffectType> = ['DROP_SHADOW'];
 
 const EFFECT_NAME_SUFFIX: Partial<Record<EffectType, string>> = {
   DROP_SHADOW: 'Shadow'
 };
 
-function hasAllowedEffects(node: SceneNode): boolean {
+function hasSupportedEffects(node: SceneNode): boolean {
   if (!('effects' in node)) return false;
   const { effects } = node;
-  return effects.some((e: Effect) => ALLOWED_EFFECT_TYPES.includes(e.type) && e.visible);
+  return effects.some((e: Effect) => SUPPORTED_EFFECT_TYPES.includes(e.type) && e.visible);
+}
+
+function hasSupportedEffectsDeep(node: SceneNode): boolean {
+  if (hasSupportedEffects(node)) return true;
+  if ('children' in node) {
+    return node.children.some((child) => hasSupportedEffectsDeep(child as SceneNode));
+  }
+  return false;
 }
 
 function getVisibleDropShadows(node: SceneNode & { effects: ReadonlyArray<Effect> }): DropShadowEffect[] {
@@ -56,6 +64,7 @@ function applySpread(vector: VectorNode, spread: number, parent: BaseNode & Chil
 
   // outlineStroke clones the node but the position may be off,
   // fix by using absoluteTransform
+  // TODO: still fucked
   strokeOutline.x = vector.absoluteTransform[0][2];
   strokeOutline.y = vector.absoluteTransform[1][2];
 
@@ -109,6 +118,7 @@ async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShado
 
     vectorNode.effects = [blurEffect];
   } else {
+    // TODO: remove?
     vectorNode.effects = [];
   }
 }
@@ -116,15 +126,20 @@ async function applyDropShadowToVector(vectorNode: VectorNode, shadow: DropShado
 /**
  * Processes a single node:
  *  1. Extracts visible drop-shadow effects.
- *  2. For each shadow, clones the node, flattens it to a vector, and applies
- *     the shadow as fill + blur + position offset.
+ *  2. For each shadow, clones the node (or a snapshot if provided), flattens
+ *     it to a vector, and applies the shadow as fill + blur + position offset.
  *  3. Removes the converted shadows from the original node.
  *  4. Groups the original with the generated shadow vectors.
  *
- * Returns the wrapping GroupNode on success, or `null` when there is nothing
+ * @param node     The live node whose effects will be stripped.
+ * @param snapshot Optional clone taken before children were processed.
+ *                 When provided, shadow vectors are derived from this snapshot
+ *                 so that child-level conversions don't pollute the parent shape.
+ *
+ * Returns the wrapping `GroupNode` on success, or `null` when there is nothing
  * to convert.
  */
-async function processNode(node: SceneNode): Promise<GroupNode | null> {
+async function processNode(node: SceneNode, snapshot?: SceneNode): Promise<GroupNode | null> {
   if (!('effects' in node)) return null;
 
   const effectsNode = node as SceneNode & { effects: ReadonlyArray<Effect> };
@@ -137,9 +152,11 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   const parentWithChildren = parent as BaseNode & ChildrenMixin;
   const nodeIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(node);
 
+  const cloneSource = snapshot ?? node;
+
   const shadowVectors: VectorNode[] = [];
   for (const shadow of dropShadows) {
-    const clone = node.clone();
+    const clone = cloneSource.clone();
     // The new clone is at this point parented to figma.currentPage
     // so the position needs to be set according to the original's absolute transform
     clone.x = node.absoluteTransform[0][2];
@@ -158,6 +175,9 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
     shadowVectors.push(vector);
   }
 
+  // Clean up the snapshot – it's no longer needed.
+  if (snapshot) snapshot.remove();
+
   // Strip converted effects from the original node
   const remainingEffects = effectsNode.effects.filter((e) => e.type !== 'DROP_SHADOW' || e.visible === false);
   node.effects = remainingEffects;
@@ -172,7 +192,43 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
   return group;
 }
 
-async function main(): Promise<void> {
+async function processNodeDeep(node: SceneNode): Promise<{ result: SceneNode; converted: number; available: number }> {
+  let converted = 0;
+  let available = 0;
+
+  const hasEffects = hasSupportedEffects(node);
+  let snapshot = undefined;
+
+  if ('children' in node) {
+    // Snapshot the node before child processing if it has supported effects
+    hasEffects && (snapshot = node.clone());
+
+    const children = node.children;
+    for (const child of children) {
+      const childResult = await processNodeDeep(child);
+      converted += childResult.converted;
+      available += childResult.available;
+    }
+  }
+
+  if (hasEffects) {
+    available++;
+    try {
+      const group = await processNode(node, snapshot);
+      if (group) {
+        converted++;
+        return { result: group, converted, available };
+      }
+    } catch (err) {
+      console.error(`Error processing node "${node.name}":`, err);
+      snapshot !== undefined && snapshot.remove();
+    }
+  }
+
+  return { result: node, converted, available };
+}
+
+async function main() {
   const selection = figma.currentPage.selection;
 
   if (selection.length === 0) {
@@ -181,38 +237,27 @@ async function main(): Promise<void> {
     return;
   }
 
-  let availableToConvertCount = 0;
-  let convertedCount = 0;
-
+  let totalConverted = 0;
+  let totalAvailable = 0;
   const newSelection: SceneNode[] = [];
 
   for (const node of [...selection]) {
-    if (!hasAllowedEffects(node)) {
+    if (!hasSupportedEffectsDeep(node)) {
       newSelection.push(node);
       continue;
     }
 
-    availableToConvertCount++;
-
-    try {
-      const group = await processNode(node);
-      if (group) {
-        convertedCount++;
-        newSelection.push(group);
-      } else {
-        newSelection.push(node);
-      }
-    } catch (err) {
-      console.error(`Error processing node "${node.name}":`, err);
-      newSelection.push(node);
-    }
+    const { result, converted, available } = await processNodeDeep(node);
+    totalConverted += converted;
+    totalAvailable += available;
+    newSelection.push(result);
   }
 
   figma.currentPage.selection = newSelection;
 
-  if (convertedCount > 0) {
-    figma.notify(t('partialSuccess', { converted: convertedCount, available: availableToConvertCount }));
-  } else if (availableToConvertCount === 0) {
+  if (totalConverted > 0) {
+    figma.notify(t('partialSuccess', { converted: totalConverted, available: totalAvailable }));
+  } else if (totalAvailable === 0) {
     figma.notify(t('noEffects'));
   } else {
     figma.notify(t('error'));
