@@ -1,154 +1,56 @@
-import {
-  getVisibleDropShadows,
-  hasSupportedEffects,
-  hasSupportedEffectsDeep,
-  isSupportedVisibleEffect
-} from './effectUtils';
-import t, { effectNameSuffix } from './strings';
+import { effectHandlers, effectLabelMap } from './effects';
+import { hasSupportedEffects, hasSupportedEffectsDeep, isSupportedVisibleEffect } from './effectUtils';
 import { convertToVector } from './vectorUtils';
-
-const applySpread = (
-  vector: VectorNode,
-  spread: number,
-  parent: BaseNode & ChildrenMixin,
-  index: number
-): VectorNode => {
-  if (spread === 0) return vector;
-
-  vector.strokes = [
-    {
-      type: 'SOLID',
-      color: { r: 0, g: 0, b: 0 },
-      opacity: 1
-    }
-  ];
-  vector.strokeWeight = Math.abs(spread);
-  vector.strokeAlign = spread > 0 ? 'OUTSIDE' : 'INSIDE';
-
-  const strokeOutline = vector.outlineStroke();
-
-  if (strokeOutline === null) {
-    console.error('applySpread failed');
-    vector.strokes = [];
-    return vector;
-  }
-
-  // outlineStroke clones the node but the position may be off,
-  // fix by using absoluteTransform and offset by spread
-  strokeOutline.x = vector.absoluteTransform[0][2] - spread;
-  strokeOutline.y = vector.absoluteTransform[1][2] - spread;
-
-  const union =
-    spread > 0
-      ? figma.union([vector, strokeOutline], parent, index)
-      : figma.subtract([vector, strokeOutline], parent, index);
-  return figma.flatten([union], parent, index);
-};
-
-const applyDropShadowToVector = async (vectorNode: VectorNode, shadow: DropShadowEffect) => {
-  const { color, offset, radius, blendMode } = shadow;
-
-  let fillPaint: SolidPaint = {
-    type: 'SOLID',
-    color: { r: color.r, g: color.g, b: color.b },
-    opacity: color.a
-  };
-
-  if (shadow.boundVariables?.color) {
-    const variable = await figma.variables.getVariableByIdAsync(shadow.boundVariables.color.id);
-    if (variable) {
-      fillPaint = figma.variables.setBoundVariableForPaint(fillPaint, 'color', variable);
-    }
-  }
-
-  vectorNode.fills = [fillPaint];
-  vectorNode.strokes = [];
-
-  vectorNode.x += offset.x;
-  vectorNode.y += offset.y;
-
-  vectorNode.blendMode = blendMode;
-
-  const hasBoundRadius = !!shadow.boundVariables?.radius;
-
-  if (radius > 0 || hasBoundRadius) {
-    let blurEffect: BlurEffect = {
-      type: 'LAYER_BLUR',
-      blurType: 'NORMAL',
-      radius,
-      visible: true
-    };
-
-    if (hasBoundRadius) {
-      const variable = await figma.variables.getVariableByIdAsync(shadow.boundVariables!.radius!.id);
-      if (variable) {
-        blurEffect = figma.variables.setBoundVariableForEffect(blurEffect, 'radius', variable) as BlurEffect;
-      }
-    }
-
-    vectorNode.effects = [blurEffect];
-  }
-};
+import t from './strings';
 
 /**
- * Processes a single node:
- *  1. Extracts visible drop-shadow effects.
- *  2. For each shadow, clones the node (or a snapshot if provided), flattens
- *     it to a vector, and applies the shadow as fill + blur + position offset.
- *  3. Removes the converted shadows from the original node.
- *  4. Groups the original with the generated shadow vectors.
- *
- * @param node     The live node whose effects will be stripped.
- * @param snapshot Optional clone taken before children were processed.
- *                 When provided, shadow vectors are derived from this snapshot
- *                 so that child-level conversions don't pollute the parent shape.
- *
- * Returns the wrapping `GroupNode` on success, or `null` when there is nothing
- * to convert.
+ * @param node Live node that will be mutated
+ * @param snapshot Optional snapshot of the node before its childrens' effects are converted
+ * @returns Resulting group or undefined if there is nothing to convert
  */
-const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<GroupNode | null> => {
-  if (!('effects' in node)) return null;
+const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<GroupNode | undefined> => {
+  if (!('effects' in node)) return undefined;
 
   const effectsNode = node as SceneNode & { effects: ReadonlyArray<Effect> };
-  const dropShadows = getVisibleDropShadows(effectsNode);
-  if (dropShadows.length === 0) return null;
 
   const parent = node.parent;
-  if (!parent) return null;
+  if (!parent) return undefined;
 
   const nodeIndex = parent.children.indexOf(node);
-
   const cloneSource = snapshot ?? node;
 
-  const shadowVectors: VectorNode[] = [];
-  for (const shadow of dropShadows) {
-    const clone = cloneSource.clone();
-    // The new clone is at this point parented to figma.currentPage
-    // so the position needs to be set according to the original's absolute transform
-    clone.x = node.absoluteTransform[0][2];
-    clone.y = node.absoluteTransform[1][2];
+  const generatedVectors: VectorNode[] = [];
 
-    let vector = convertToVector(clone, parent, nodeIndex);
+  // Run every registered handler against this node's effects.
+  for (const handler of effectHandlers) {
+    const effects = handler.getEffects(effectsNode);
 
-    const spread = shadow.spread;
-    if (spread !== undefined && spread !== 0) {
-      vector = applySpread(vector, spread, parent, nodeIndex);
+    // TODO: Optimize by hoisting some stuff
+    for (const effect of effects) {
+      const clone = cloneSource.clone();
+      clone.x = node.absoluteTransform[0][2];
+      clone.y = node.absoluteTransform[1][2];
+
+      let vector = convertToVector(clone, parent, nodeIndex);
+      vector = await handler.apply(vector, effect, parent, nodeIndex);
+      vector.name = `${node.name} (${effectLabelMap.get(effect.type) ?? effect.type})`;
+      generatedVectors.push(vector);
     }
-
-    await applyDropShadowToVector(vector, shadow);
-    vector.name = `${node.name} (${effectNameSuffix[shadow.type]})`;
-    shadowVectors.push(vector);
   }
 
   if (snapshot) snapshot.remove();
+
+  if (generatedVectors.length === 0) {
+    return undefined;
+  }
 
   // Strip converted effects from the original node
   const remainingEffects = effectsNode.effects.filter((e) => !isSupportedVisibleEffect(e));
   node.effects = remainingEffects;
 
   // Group result in place
-  const groupIndex = parent.children.indexOf(shadowVectors[shadowVectors.length - 1]);
-  const group = figma.group([node, ...shadowVectors], parent, groupIndex);
+  const groupIndex = parent.children.indexOf(generatedVectors[generatedVectors.length - 1]);
+  const group = figma.group([node, ...generatedVectors], parent, groupIndex);
   group.name = node.name;
 
   return group;
