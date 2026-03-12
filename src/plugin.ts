@@ -1,4 +1,4 @@
-import strings from './strings';
+import t from './strings';
 
 type EffectType = Effect['type'];
 
@@ -149,7 +149,7 @@ async function processNode(node: SceneNode): Promise<GroupNode | null> {
 
   // Strip converted effects from the original node
   const remainingEffects = effectsNode.effects.filter((e) => e.type !== 'DROP_SHADOW' || e.visible === false);
-  (node as SceneNode & BlendMixin).effects = remainingEffects;
+  node.effects = remainingEffects;
 
   // Group result in place
   const groupIndex = (parentWithChildren.children as ReadonlyArray<SceneNode>).indexOf(
@@ -165,12 +165,14 @@ async function main(): Promise<void> {
   const selection = figma.currentPage.selection;
 
   if (selection.length === 0) {
-    figma.notify(strings.noSelection);
+    figma.notify(t('noSelection'));
     figma.closePlugin();
     return;
   }
 
+  let availableToConvertCount = 0;
   let convertedCount = 0;
+
   const newSelection: SceneNode[] = [];
 
   for (const node of [...selection]) {
@@ -178,6 +180,8 @@ async function main(): Promise<void> {
       newSelection.push(node);
       continue;
     }
+
+    availableToConvertCount++;
 
     try {
       const group = await processNode(node);
@@ -196,9 +200,11 @@ async function main(): Promise<void> {
   figma.currentPage.selection = newSelection;
 
   if (convertedCount > 0) {
-    figma.notify(strings.success);
+    figma.notify(t('partialSuccess', { converted: convertedCount, available: availableToConvertCount }));
+  } else if (availableToConvertCount === 0) {
+    figma.notify(t('noEffects'));
   } else {
-    figma.notify(strings.error);
+    figma.notify(t('error'));
   }
 
   figma.closePlugin();
