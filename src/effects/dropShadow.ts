@@ -1,3 +1,4 @@
+import { buildFillPaintFromShadow, solidPaint } from '../utils';
 import type { EffectHandler } from './types';
 
 const applySpread = (
@@ -8,56 +9,37 @@ const applySpread = (
 ): VectorNode => {
   if (spread === 0) return vector;
 
-  vector.strokes = [
-    {
-      type: 'SOLID',
-      color: { r: 0, g: 0, b: 0 },
-      opacity: 1
-    }
-  ];
+  vector.strokes = [solidPaint];
   vector.strokeWeight = Math.abs(spread);
   vector.strokeAlign = spread > 0 ? 'OUTSIDE' : 'INSIDE';
 
   const strokeOutline = vector.outlineStroke();
 
   if (strokeOutline === null) {
-    console.error('applySpread failed');
+    console.error('applySpread (drop shadow) failed');
     vector.strokes = [];
     return vector;
   }
 
-  strokeOutline.x = vector.absoluteTransform[0][2] - spread;
-  strokeOutline.y = vector.absoluteTransform[1][2] - spread;
+  strokeOutline.x = vector.absoluteTransform[0][2] + (spread > 0 ? -spread : 0);
+  strokeOutline.y = vector.absoluteTransform[1][2] + (spread > 0 ? -spread : 0);
 
-  const union =
+  const result =
     spread > 0
       ? figma.union([vector, strokeOutline], parent, index)
       : figma.subtract([vector, strokeOutline], parent, index);
-  return figma.flatten([union], parent, index);
+  return figma.flatten([result], parent, index);
 };
 
 const applyDropShadowToVector = async (vectorNode: VectorNode, shadow: DropShadowEffect) => {
-  const { color, offset, radius, blendMode } = shadow;
+  const { offset, radius, blendMode } = shadow;
 
-  let fillPaint: SolidPaint = {
-    type: 'SOLID',
-    color: { r: color.r, g: color.g, b: color.b },
-    opacity: color.a
-  };
-
-  if (shadow.boundVariables?.color) {
-    const variable = await figma.variables.getVariableByIdAsync(shadow.boundVariables.color.id);
-    if (variable) {
-      fillPaint = figma.variables.setBoundVariableForPaint(fillPaint, 'color', variable);
-    }
-  }
-
-  vectorNode.fills = [fillPaint];
-  vectorNode.strokes = [];
+  const fillPaint = await buildFillPaintFromShadow(shadow);
 
   vectorNode.x += offset.x;
   vectorNode.y += offset.y;
-
+  vectorNode.fills = [fillPaint];
+  vectorNode.strokes = [];
   vectorNode.blendMode = blendMode;
 
   const hasBoundRadius = !!shadow.boundVariables?.radius;
@@ -84,6 +66,7 @@ const applyDropShadowToVector = async (vectorNode: VectorNode, shadow: DropShado
 export const dropShadowHandler: EffectHandler<DropShadowEffect> = {
   type: 'DROP_SHADOW',
   label: 'Shadow',
+  placement: 'below',
 
   getEffects(node) {
     return node.effects.filter((e): e is DropShadowEffect => e.type === 'DROP_SHADOW' && e.visible);

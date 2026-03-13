@@ -1,6 +1,5 @@
 import { effectHandlers, effectLabelMap } from './effects';
-import { hasSupportedEffects, hasSupportedEffectsDeep, isSupportedVisibleEffect } from './effectUtils';
-import { convertToVector } from './vectorUtils';
+import { convertToVector, hasSupportedEffects, hasSupportedEffectsDeep, isSupportedVisibleEffect } from './utils';
 import t from './strings';
 
 /**
@@ -19,7 +18,8 @@ const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<Group
   const nodeIndex = parent.children.indexOf(node);
   const cloneSource = snapshot ?? node;
 
-  const generatedVectors: VectorNode[] = [];
+  const belowNodes: SceneNode[] = [];
+  const aboveNodes: SceneNode[] = [];
 
   // Run every registered handler against this node's effects.
   for (const handler of effectHandlers) {
@@ -31,16 +31,26 @@ const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<Group
       clone.x = node.absoluteTransform[0][2];
       clone.y = node.absoluteTransform[1][2];
 
-      let vector = convertToVector(clone, parent, nodeIndex);
-      vector = await handler.apply(vector, effect, parent, nodeIndex);
-      vector.name = `${node.name} (${effectLabelMap.get(effect.type) ?? effect.type})`;
-      generatedVectors.push(vector);
+      // Insert below-nodes beneath the original, above-nodes after it.
+      const insertIndex =
+        handler.placement === 'above' ? parent.children.indexOf(node) + 1 : parent.children.indexOf(node);
+
+      let vector = convertToVector(clone, parent, insertIndex);
+      const resultNode = await handler.apply(vector, effect, parent, insertIndex, node);
+      resultNode.name = `${node.name} (${effectLabelMap.get(effect.type) ?? effect.type})`;
+
+      if (handler.placement === 'above') {
+        aboveNodes.push(resultNode);
+      } else {
+        belowNodes.push(resultNode);
+      }
     }
   }
 
   if (snapshot) snapshot.remove();
 
-  if (generatedVectors.length === 0) {
+  const generatedNodes = [...belowNodes, ...aboveNodes];
+  if (generatedNodes.length === 0) {
     return undefined;
   }
 
@@ -48,9 +58,11 @@ const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<Group
   const remainingEffects = effectsNode.effects.filter((e) => !isSupportedVisibleEffect(e));
   node.effects = remainingEffects;
 
-  // Group result in place
-  const groupIndex = parent.children.indexOf(generatedVectors[generatedVectors.length - 1]);
-  const group = figma.group([node, ...generatedVectors], parent, groupIndex);
+  // Group result in place: below nodes behind original, above nodes in front.
+  const allGrouped = [...belowNodes, node, ...aboveNodes];
+  const lowestNode = belowNodes.length > 0 ? belowNodes[belowNodes.length - 1] : node;
+  const groupIndex = parent.children.indexOf(lowestNode);
+  const group = figma.group(allGrouped, parent, groupIndex);
   group.name = node.name;
 
   return group;
