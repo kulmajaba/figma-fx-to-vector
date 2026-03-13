@@ -53,6 +53,5 @@ export const convertToVector = (node: SceneNode, parent: BaseNode & ChildrenMixi
     }
   }
 
-  console.log('flatten without strokes');
   return figma.flatten([figma.union([node], parent, index)], parent, index);
 };
