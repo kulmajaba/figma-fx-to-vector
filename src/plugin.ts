@@ -36,7 +36,7 @@ const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<Group
         handler.placement === 'above' ? parent.children.indexOf(node) + 1 : parent.children.indexOf(node);
 
       let vector = convertToVector(clone, parent, insertIndex);
-      const resultNode = await handler.apply(vector, effect, parent, insertIndex, node);
+      const resultNode = await handler.apply(vector, effect, parent, insertIndex);
       resultNode.name = `${node.name} (${effectLabelMap.get(effect.type) ?? effect.type})`;
 
       if (handler.placement === 'above') {

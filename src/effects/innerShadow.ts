@@ -59,10 +59,13 @@ export const innerShadowHandler: EffectHandler<InnerShadowEffect> = {
     return node.effects.filter((e): e is InnerShadowEffect => e.type === 'INNER_SHADOW' && e.visible);
   },
 
-  async apply(vector, effect, parent, index, originalNode) {
+  async apply(vector, effect, parent, index) {
     const { offset, radius, blendMode } = effect;
 
     const fillPaint = await buildFillPaintFromShadow(effect);
+
+    const maskVector = vector.clone();
+    parent.insertChild(index, maskVector);
 
     vector.x += offset.x;
     vector.y += offset.y;
@@ -76,14 +79,9 @@ export const innerShadowHandler: EffectHandler<InnerShadowEffect> = {
 
     // Fill rectangle
     const padding = radius + Math.max(Math.abs(offset.x), Math.abs(offset.y)) + Math.abs(spread ?? 0);
-    const fillRect = createPaddedFillRect(originalNode, padding, solidPaint, parent, index);
+    const fillRect = createPaddedFillRect(vector, padding, solidPaint, parent, index);
 
     // Mask layer
-    const maskClone = originalNode.clone();
-    maskClone.x = originalNode.absoluteTransform[0][2];
-    maskClone.y = originalNode.absoluteTransform[1][2];
-    const maskVector = convertToVector(maskClone, parent, index);
-
     maskVector.fills = [solidPaint];
     maskVector.strokes = [];
     maskVector.effects = [];

@@ -34,11 +34,5 @@ export interface EffectHandler<T extends Effect = Effect> {
    * @param index   Insertion index inside `parent`.
    * @param originalNode  The live original node (for making additional clones).
    */
-  apply(
-    vector: VectorNode,
-    effect: T,
-    parent: BaseNode & ChildrenMixin,
-    index: number,
-    originalNode: SceneNode
-  ): Promise<SceneNode>;
+  apply(vector: VectorNode, effect: T, parent: BaseNode & ChildrenMixin, index: number): Promise<SceneNode>;
 }
