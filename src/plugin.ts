@@ -25,7 +25,6 @@ const processNode = async (node: SceneNode, snapshot?: SceneNode): Promise<Group
   for (const handler of effectHandlers) {
     const effects = handler.getEffects(effectsNode);
 
-    // TODO: Optimize by hoisting some stuff
     for (const effect of effects) {
       const clone = cloneSource.clone();
       clone.x = node.absoluteTransform[0][2];
